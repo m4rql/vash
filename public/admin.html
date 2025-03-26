@@ -1,0 +1,356 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>RumbleRoyale Admin Panel</title>
+    <script src="/socket.io/socket.io.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <style>
+      body {
+        font-family: "Courier New", monospace;
+        background-color: #1e1e1e;
+        color: #d4d4d4;
+        margin: 0;
+        padding: 20px;
+      }
+
+      .admin-container {
+        display: grid;
+        grid-template-columns: 1fr 2fr;
+        gap: 20px;
+        max-width: 1400px;
+        margin: 0 auto;
+      }
+
+      .controls-panel {
+        background: #252526;
+        padding: 20px;
+        border-radius: 8px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .log-panel {
+        background: #1e1e1e;
+        padding: 20px;
+        border-radius: 8px;
+        border: 1px solid #333;
+        height: 600px;
+        overflow-y: auto;
+      }
+
+      #logWindow {
+        font-family: "Courier New", monospace;
+        white-space: pre-wrap;
+        color: #00ff00;
+        line-height: 1.5;
+      }
+
+      .timestamp {
+        color: #569cd6;
+      }
+
+      .event {
+        color: #4ec9b0;
+      }
+
+      .player {
+        color: #9cdcfe;
+      }
+
+      button {
+        background: #0e639c;
+        color: white;
+        border: none;
+        padding: 10px 15px;
+        margin: 5px;
+        border-radius: 4px;
+        cursor: pointer;
+        width: 100%;
+        font-size: 14px;
+      }
+
+      button:hover {
+        background: #1177bb;
+      }
+
+      .stats-panel {
+        background: #252526;
+        padding: 15px;
+        border-radius: 4px;
+        margin-bottom: 20px;
+      }
+
+      .stat-item {
+        display: flex;
+        justify-content: space-between;
+        margin: 5px 0;
+        padding: 5px;
+        background: #333;
+        border-radius: 3px;
+      }
+
+      h2 {
+        color: #569cd6;
+        margin-top: 0;
+      }
+
+      .danger-zone {
+        margin-top: 20px;
+        padding: 15px;
+        border: 1px solid #ff4444;
+        border-radius: 4px;
+      }
+
+      .danger-zone button {
+        background: #c72c41;
+      }
+
+      .danger-zone button:hover {
+        background: #d63447;
+      }
+
+      .stats-graph {
+        background: #252526;
+        padding: 20px;
+        border-radius: 8px;
+        margin-top: 20px;
+        box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+      }
+
+      .stats-graph canvas {
+        width: 100% !important;
+        height: 300px !important;
+        margin-top: 10px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="admin-container">
+      <div class="controls-panel">
+        <h2>Admin Controls</h2>
+
+        <div class="stats-panel">
+          <h3>Game Stats</h3>
+          <div class="stat-item">
+            <span>Players Online:</span>
+            <span id="playerCount">0</span>
+          </div>
+          <div class="stat-item">
+            <span>Game State:</span>
+            <span id="gameState">WAITING</span>
+          </div>
+        </div>
+
+        <div class="game-controls">
+          <h3>Game Controls</h3>
+          <button id="startRoundBtn">Start New Round</button>
+          <button id="forceEndBtn">Force End Round</button>
+        </div>
+
+        <div class="danger-zone">
+          <h3>Danger Zone</h3>
+          <button id="resetGameBtn">Reset Game State</button>
+          <button id="kickAllBtn">Kick All Players</button>
+        </div>
+      </div>
+
+      <div class="log-panel">
+        <h2>Game Logs</h2>
+        <div id="logWindow"></div>
+      </div>
+    </div>
+
+    <div class="stats-graph">
+      <h2>Player Activity (Last 24 Hours)</h2>
+      <canvas id="playerStatsGraph"></canvas>
+    </div>
+
+    <script>
+      const socket = io();
+      const logWindow = document.getElementById("logWindow");
+      const playerCount = document.getElementById("playerCount");
+      const gameState = document.getElementById("gameState");
+
+      // Helper function to add log entry
+      function addLog(type, message) {
+        const timestamp = new Date().toLocaleTimeString();
+        const logEntry = document.createElement("div");
+        logEntry.innerHTML = `<span class="timestamp">[${timestamp}]</span> <span class="event">[${type}]</span> ${message}`;
+        logWindow.appendChild(logEntry);
+        logWindow.scrollTop = logWindow.scrollHeight;
+      }
+
+      // Socket event handlers
+      socket.on("adminUpdate", (data) => {
+        playerCount.textContent = data.playerCount;
+        gameState.textContent = data.gameState;
+        addLog("STATE", `Game state updated to: ${data.gameState}`);
+      });
+
+      socket.on("adminLog", (data) => {
+        addLog(data.type, data.message);
+      });
+
+      // Button event handlers
+      document
+        .getElementById("startRoundBtn")
+        .addEventListener("click", async () => {
+          try {
+            const response = await fetch("/admin/start-round", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            const data = await response.json();
+            addLog("ACTION", data.message || "Round started");
+          } catch (error) {
+            addLog("ERROR", "Failed to start round");
+          }
+        });
+
+      document
+        .getElementById("forceEndBtn")
+        .addEventListener("click", async () => {
+          try {
+            const response = await fetch("/admin/force-end", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+            });
+            const data = await response.json();
+            addLog("ACTION", data.message || "Round forcefully ended");
+          } catch (error) {
+            addLog("ERROR", "Failed to end round");
+          }
+        });
+
+      document
+        .getElementById("resetGameBtn")
+        .addEventListener("click", async () => {
+          if (
+            confirm(
+              "Are you sure you want to reset the game state? This will affect all connected players."
+            )
+          ) {
+            try {
+              const response = await fetch("/admin/reset-game", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              });
+              const data = await response.json();
+              addLog("SYSTEM", data.message || "Game state reset");
+            } catch (error) {
+              addLog("ERROR", "Failed to reset game state");
+            }
+          }
+        });
+
+      document
+        .getElementById("kickAllBtn")
+        .addEventListener("click", async () => {
+          if (confirm("Are you sure you want to kick all players?")) {
+            try {
+              const response = await fetch("/admin/kick-all", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+              });
+              const data = await response.json();
+              addLog("SYSTEM", data.message || "All players kicked");
+            } catch (error) {
+              addLog("ERROR", "Failed to kick players");
+            }
+          }
+        });
+
+      // Initial connection log
+      addLog("SYSTEM", "Admin panel connected");
+
+      // Initialize player stats tracking
+      const hourlyStats = new Array(24).fill(0);
+      let playerStatsChart;
+
+      // Helper function to initialize the chart
+      function initializeChart() {
+        const ctx = document
+          .getElementById("playerStatsGraph")
+          .getContext("2d");
+        const labels = Array.from({ length: 24 }, (_, i) => {
+          const hour = (new Date().getHours() - (23 - i) + 24) % 24;
+          return `${hour}:00`;
+        });
+
+        playerStatsChart = new Chart(ctx, {
+          type: "line",
+          data: {
+            labels: labels,
+            datasets: [
+              {
+                label: "Unique Players",
+                data: hourlyStats,
+                borderColor: "#4ec9b0",
+                backgroundColor: "rgba(78, 201, 176, 0.1)",
+                tension: 0.4,
+                fill: true,
+              },
+            ],
+          },
+          options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            scales: {
+              y: {
+                beginAtZero: true,
+                ticks: {
+                  stepSize: 1,
+                  color: "#d4d4d4",
+                },
+                grid: {
+                  color: "#333",
+                },
+              },
+              x: {
+                ticks: {
+                  color: "#d4d4d4",
+                },
+                grid: {
+                  color: "#333",
+                },
+              },
+            },
+            plugins: {
+              legend: {
+                labels: {
+                  color: "#d4d4d4",
+                },
+              },
+            },
+          },
+        });
+      }
+
+      // Update chart with new data
+      function updateChart(stats) {
+        if (!playerStatsChart) {
+          initializeChart();
+        }
+
+        const labels = Array.from({ length: 24 }, (_, i) => {
+          const hour = (new Date().getHours() - (23 - i) + 24) % 24;
+          return `${hour}:00`;
+        });
+
+        playerStatsChart.data.labels = labels;
+        playerStatsChart.data.datasets[0].data = stats;
+        playerStatsChart.update();
+      }
+
+      // Socket event for player stats updates
+      socket.on("playerStatsUpdate", (data) => {
+        hourlyStats.splice(0, hourlyStats.length, ...data.hourlyStats);
+        updateChart(hourlyStats);
+      });
+
+      // Initialize chart on load
+      initializeChart();
+    </script>
+  </body>
+</html>
