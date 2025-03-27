@@ -408,139 +408,116 @@ app.post("/admin/kick-all", (req, res) => {
   }
 });
 
-// Modify existing socket connection handling to update player stats
+// Socket connection handling
 io.on("connection", (socket) => {
-  // Check if connection is from admin panel
-  const isAdmin = socket.handshake.headers.referer?.includes("/admin");
+  console.log("New client connected:", socket.id);
+  emitAdminLog("CONNECTION", `New client connected: ${socket.id}`);
 
-  if (isAdmin) {
-    emitAdminLog("ADMIN", `Admin panel connected: ${socket.id}`);
-
-    // Send initial admin update
-    io.emit("adminUpdate", {
-      playerCount: gameState.players.size,
-      gameState: gameState.currentState,
-    });
-
-    // Send initial player stats
-    broadcastPlayerStats();
-
-    // Handle admin disconnection
-    socket.on("disconnect", () => {
-      emitAdminLog("ADMIN", "Admin panel disconnected");
-    });
-
-    return; // Don't process further for admin connections
-  }
-
-  // Regular player connection
-  emitAdminLog("CONNECTION", `Player connected: ${socket.id}`);
-  updatePlayerStats(socket.id);
-
-  // Initialize player
+  // Add new player to game state
   gameState.players.set(socket.id, {
     id: socket.id,
-    username: null,
+    username: "",
     isReady: false,
   });
 
-  // Start automatic rounds if this is the first player and no round is active
-  if (gameState.players.size === 1 && !gameState.isRoundActive) {
-    startAutomaticRound();
-  }
+  // Update player stats
+  updatePlayerStats(socket.id);
+  broadcastPlayers();
 
-  // Handle username setting (joining battle)
+  // Handle username setting
   socket.on("setUsername", (username) => {
     const player = gameState.players.get(socket.id);
     if (player) {
       player.username = username;
       player.isReady = true;
-      emitAdminLog("PLAYER", `${username} joined the battle`);
+      emitAdminLog("PLAYER", `${username} (${socket.id}) joined the game`);
       broadcastPlayers();
 
-      // Update admin panel
-      io.emit("adminUpdate", {
-        playerCount: gameState.players.size,
-        gameState: gameState.currentState,
-      });
+      // Start round if enough players and not already started
+      const readyPlayers = Array.from(gameState.players.values()).filter(
+        (p) => p.username
+      );
+      if (readyPlayers.length >= 2 && !gameState.isRoundActive) {
+        startAutomaticRound();
+      }
     }
   });
 
-  // Handle exit battle
+  // Handle player exit
   socket.on("exitBattle", (username) => {
     const player = gameState.players.get(socket.id);
     if (player) {
-      const oldUsername = player.username;
-      player.username = null;
+      emitAdminLog("PLAYER", `${username} (${socket.id}) left the game`);
+      player.username = "";
       player.isReady = false;
-
-      emitAdminLog("PLAYER", `${oldUsername} has exited the battle`);
-      io.emit("chatUpdate", {
-        message: `👋 ${oldUsername} has left the battle!`,
-      });
-
-      // Check if we need to end the round due to insufficient players
-      if (gameState.currentState === "IN_PROGRESS") {
-        const readyPlayers = Array.from(gameState.players.values()).filter(
-          (p) => p.username
-        );
-        if (readyPlayers.length < 2) {
-          emitAdminLog("GAME", "Round ended due to insufficient players");
-          io.emit("chatUpdate", {
-            message: "❌ Round ended - Not enough players remaining",
-          });
-          endRound();
-        }
-      }
-
       broadcastPlayers();
     }
   });
 
   // Handle disconnection
   socket.on("disconnect", () => {
-    const player = gameState.players.get(socket.id);
-    if (player) {
-      if (player.username) {
-        emitAdminLog("CONNECTION", `Player disconnected: ${player.username}`);
-        io.emit("chatUpdate", {
-          message: `👋 ${player.username} has disconnected!`,
-        });
-      } else {
-        emitAdminLog("CONNECTION", `Unnamed player disconnected: ${socket.id}`);
-      }
+    console.log("Client disconnected:", socket.id);
+    emitAdminLog("CONNECTION", `Client disconnected: ${socket.id}`);
+    gameState.players.delete(socket.id);
+    broadcastPlayers();
 
-      // Check if we need to end the round due to insufficient players
-      if (gameState.currentState === "IN_PROGRESS") {
-        const readyPlayers = Array.from(gameState.players.values()).filter(
-          (p) => p.username
-        );
-        if (readyPlayers.length < 2) {
-          emitAdminLog("GAME", "Round ended due to insufficient players");
-          io.emit("chatUpdate", {
-            message: "❌ Round ended - Not enough players remaining",
-          });
-          endRound();
-        }
-      }
-
-      gameState.players.delete(socket.id);
-      broadcastPlayers();
-
-      // Update admin panel
-      io.emit("adminUpdate", {
-        playerCount: gameState.players.size,
-        gameState: gameState.currentState,
-      });
+    // End round if not enough players
+    const readyPlayers = Array.from(gameState.players.values()).filter(
+      (p) => p.username
+    );
+    if (readyPlayers.length < 2 && gameState.isRoundActive) {
+      endRound("Not enough players remaining");
     }
   });
 });
 
-// Start server
+// Function to end the round
+function endRound(reason = "") {
+  if (!gameState.isRoundActive) return;
+
+  // Clear any existing timers
+  if (gameState.roundTimer) {
+    clearInterval(gameState.roundTimer);
+    gameState.roundTimer = null;
+  }
+
+  gameTimers.forEach((timer) => clearTimeout(timer));
+  gameTimers.length = 0;
+
+  // Reset game state
+  gameState.isRoundActive = false;
+  gameState.currentState = "WAITING_FOR_PLAYERS";
+
+  // Broadcast round end
+  io.emit("roundEnded", {
+    message: reason ? `Round ended: ${reason}` : "Round ended",
+    winner: gameState.winner,
+  });
+
+  // Reset winner
+  gameState.winner = null;
+  broadcastPlayers();
+
+  // Start new round after delay
+  setTimeout(() => {
+    if (
+      Array.from(gameState.players.values()).filter((p) => p.username).length >=
+      2
+    ) {
+      startAutomaticRound();
+    }
+  }, 5000);
+}
+
+// Function to emit admin logs
+function emitAdminLog(type, message) {
+  io.emit("adminLog", { type, message, timestamp: new Date().toISOString() });
+}
+
+// Start the server
 const PORT = process.env.PORT || 3000;
 httpServer.listen(PORT, () => {
-  console.log(`Server is running on http://localhost:${PORT}`);
-  console.log("Socket.io is ready for connections");
+  console.log(`Server running on port ${PORT}`);
 });
 
 /**

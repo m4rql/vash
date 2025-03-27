@@ -4,73 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>RumbleRoyale Game</title>
+    <link
+      href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/style.css" />
     <script src="/socket.io/socket.io.js"></script>
-    <style>
-      body {
-        font-family: Arial, sans-serif;
-        max-width: 1200px;
-        margin: 0 auto;
-        padding: 20px;
-        background-color: #f0f2f5;
-      }
-      .game-container {
-        display: grid;
-        grid-template-columns: 3fr 1fr;
-        gap: 20px;
-      }
-      #chatBox {
-        height: 400px;
-        overflow-y: auto;
-        padding: 15px;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-      #playerList {
-        background: white;
-        padding: 15px;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-      .controls {
-        margin-top: 20px;
-        padding: 15px;
-        background: white;
-        border-radius: 8px;
-        box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-      }
-      input,
-      button {
-        padding: 8px;
-        margin: 5px;
-        border: 1px solid #ddd;
-        border-radius: 4px;
-      }
-      button {
-        background-color: #4caf50;
-        color: white;
-        border: none;
-        cursor: pointer;
-      }
-      button:hover {
-        background-color: #45a049;
-      }
-      .chat-message {
-        margin: 5px 0;
-        padding: 5px;
-        border-bottom: 1px solid #eee;
-      }
-      .player-item {
-        padding: 8px;
-        margin: 4px 0;
-        background: #f8f9fa;
-        border-radius: 4px;
-      }
-      .current-player {
-        background: #e2e6ea;
-        font-weight: bold;
-      }
-    </style>
   </head>
   <body>
     <h1>RumbleRoyale Game</h1>
