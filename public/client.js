@@ -5,16 +5,32 @@ const socket = io();
 const chatBox = document.getElementById("chatBox");
 const playerList = document.getElementById("playerList");
 const usernameInput = document.getElementById("usernameInput");
-const setUsernameBtn = document.getElementById("setUsernameBtn");
+
+// Create Set Nickname button
+const setNicknameBtn = document.createElement("button");
+setNicknameBtn.id = "setNicknameBtn";
+setNicknameBtn.textContent = "Set Nickname";
+setNicknameBtn.className = "gradient-button";
+document.querySelector(".controls").appendChild(setNicknameBtn);
+
+// Create Join Battle button
+const joinBattleBtn = document.createElement("button");
+joinBattleBtn.id = "joinBattleBtn";
+joinBattleBtn.textContent = "Join Battle";
+joinBattleBtn.style.display = "none";
+joinBattleBtn.className = "gradient-button";
+document.querySelector(".controls").appendChild(joinBattleBtn);
 
 // Create Exit Battle button
 const exitBattleBtn = document.createElement("button");
 exitBattleBtn.id = "exitBattleBtn";
 exitBattleBtn.textContent = "Exit Battle";
 exitBattleBtn.style.display = "none";
+exitBattleBtn.className = "gradient-button";
 document.querySelector(".controls").appendChild(exitBattleBtn);
 
 let myUsername = "";
+let isInBattle = false;
 let players = [];
 let currentGameState = "WAITING_FOR_PLAYERS";
 let timerMessageId = null;
@@ -57,10 +73,9 @@ socket.on("roundEnded", (data) => {
   }
 
   if (myUsername) {
-    setUsernameBtn.disabled = false;
-    usernameInput.disabled = false;
-    usernameInput.value = myUsername;
+    isInBattle = false;
     exitBattleBtn.style.display = "none";
+    joinBattleBtn.style.display = "inline-block";
     appendToChatBox('Click "Join Battle" to join the next round!');
   }
 });
@@ -71,19 +86,23 @@ socket.on("updatePlayers", (data) => {
   updatePlayerList();
 
   if (data.currentState === "IN_PROGRESS") {
-    setUsernameBtn.disabled = Boolean(myUsername);
-    usernameInput.disabled = Boolean(myUsername);
+    if (myUsername && !isInBattle) {
+      joinBattleBtn.style.display = "inline-block";
+      exitBattleBtn.style.display = "none";
+    }
   } else if (data.currentState === "WAITING_FOR_PLAYERS") {
-    setUsernameBtn.disabled = false;
-    usernameInput.disabled = false;
     if (myUsername) {
       usernameInput.value = myUsername;
+      if (!isInBattle) {
+        joinBattleBtn.style.display = "inline-block";
+        exitBattleBtn.style.display = "none";
+      }
     }
   }
 });
 
-// Username setup handler
-setUsernameBtn.addEventListener("click", () => {
+// Nickname setup handler
+setNicknameBtn.addEventListener("click", () => {
   const username = usernameInput.value.trim();
 
   if (username.length < 3) {
@@ -98,22 +117,35 @@ setUsernameBtn.addEventListener("click", () => {
 
   socket.emit("setUsername", username);
   myUsername = username;
-  setUsernameBtn.disabled = true;
+  setNicknameBtn.style.display = "none";
   usernameInput.disabled = true;
-  exitBattleBtn.style.display = "inline-block";
-  appendToChatBox(`✨ Welcome, ${username}! You have joined the battle!`);
+  joinBattleBtn.style.display = "inline-block";
+  appendToChatBox(
+    `✨ Welcome, ${username}! Click "Join Battle" when you're ready to fight!`
+  );
 });
 
-// Exit battle handler
-exitBattleBtn.addEventListener("click", () => {
-  if (myUsername) {
-    socket.emit("exitBattle", myUsername);
-    setUsernameBtn.disabled = false;
-    usernameInput.disabled = false;
-    exitBattleBtn.style.display = "none";
-    appendToChatBox("You have exited the battle.");
-    myUsername = "";
+// Join Battle handler
+joinBattleBtn.addEventListener("click", () => {
+  if (!myUsername) {
+    appendToChatBox("❌ Please set your nickname first!");
+    return;
   }
+
+  socket.emit("joinBattle", myUsername);
+  isInBattle = true;
+  joinBattleBtn.style.display = "none";
+  exitBattleBtn.style.display = "inline-block";
+  appendToChatBox(`⚔️ ${myUsername} has joined the battle!`);
+});
+
+// Exit Battle handler
+exitBattleBtn.addEventListener("click", () => {
+  socket.emit("exitBattle", myUsername);
+  isInBattle = false;
+  exitBattleBtn.style.display = "none";
+  joinBattleBtn.style.display = "inline-block";
+  appendToChatBox(`🚪 ${myUsername} has left the battle!`);
 });
 
 // Helper functions
@@ -165,7 +197,7 @@ function updatePlayerList() {
       playerDiv.classList.add("current-player");
     }
 
-    const readyStatus = player.username ? "⚔️" : "";
+    const readyStatus = player.isReady ? "⚔️" : "";
     const healthBar = player.username ? createHealthBar(100) : "";
     const displayName = player.username || "Unnamed Warrior";
 

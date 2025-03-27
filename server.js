@@ -110,9 +110,14 @@ function broadcastPlayerStats() {
 function getPlayersList() {
   return Array.from(gameState.players.values()).map((player) => ({
     id: player.id,
-    username: player.username,
-    isReady: Boolean(player.username), // Player is ready if they have a username
+    username: player.username || "",
+    isReady: player.isReady || false,
   }));
+}
+
+// Helper function to count ready players
+function getReadyPlayersCount() {
+  return Array.from(gameState.players.values()).filter((p) => p.isReady).length;
 }
 
 // Broadcast updated players list to all clients
@@ -184,6 +189,14 @@ async function simulateGame(readyPlayers) {
 async function startAutomaticRound() {
   if (gameState.isRoundActive) return; // Prevent multiple rounds from starting
 
+  const readyPlayersCount = getReadyPlayersCount();
+  if (readyPlayersCount < 2) {
+    io.emit("chatUpdate", {
+      message: "❌ Waiting for more players to join the battle...",
+    });
+    return;
+  }
+
   gameState.isRoundActive = true;
   let countdown = 180; // 3 minutes in seconds
 
@@ -213,8 +226,9 @@ async function startAutomaticRound() {
 
 // Function to handle the round start logic
 async function handleRoundStart() {
-  const players = Array.from(gameState.players.values());
-  const readyPlayers = players.filter((p) => p.username); // Players are ready if they have a username
+  const readyPlayers = Array.from(gameState.players.values()).filter(
+    (p) => p.isReady
+  );
 
   if (readyPlayers.length < 2) {
     io.emit("chatUpdate", {
@@ -222,7 +236,6 @@ async function handleRoundStart() {
         "❌ Not enough players ready for this round. Waiting for next round...",
     });
     resetRoundState();
-    startAutomaticRound(); // Start new countdown for next attempt
     return;
   }
 
@@ -231,7 +244,7 @@ async function handleRoundStart() {
     gameState.roundNumber++;
     emitAdminLog(
       "GAME",
-      `Round ${gameState.roundNumber} started automatically with ${readyPlayers.length} players`
+      `Round ${gameState.roundNumber} started with ${readyPlayers.length} players`
     );
     broadcastPlayers();
 
@@ -333,6 +346,15 @@ app.post("/admin/force-end", (req, res) => {
 // Admin route to start round immediately
 app.post("/admin/start-round", async (req, res) => {
   try {
+    const readyPlayersCount = getReadyPlayersCount();
+
+    if (readyPlayersCount < 2) {
+      return res.status(400).json({
+        success: false,
+        message: "Not enough players ready for battle",
+      });
+    }
+
     // Only allow starting if a round is active (in countdown phase)
     if (!gameState.isRoundActive) {
       return res.status(400).json({
@@ -429,15 +451,22 @@ io.on("connection", (socket) => {
     const player = gameState.players.get(socket.id);
     if (player) {
       player.username = username;
+      emitAdminLog("PLAYER", `${username} (${socket.id}) set their username`);
+      broadcastPlayers();
+    }
+  });
+
+  // Handle joining battle
+  socket.on("joinBattle", (username) => {
+    const player = gameState.players.get(socket.id);
+    if (player && player.username === username) {
       player.isReady = true;
-      emitAdminLog("PLAYER", `${username} (${socket.id}) joined the game`);
+      emitAdminLog("PLAYER", `${username} (${socket.id}) joined the battle`);
       broadcastPlayers();
 
       // Start round if enough players and not already started
-      const readyPlayers = Array.from(gameState.players.values()).filter(
-        (p) => p.username
-      );
-      if (readyPlayers.length >= 2 && !gameState.isRoundActive) {
+      const readyPlayersCount = getReadyPlayersCount();
+      if (readyPlayersCount >= 2 && !gameState.isRoundActive) {
         startAutomaticRound();
       }
     }
@@ -446,11 +475,16 @@ io.on("connection", (socket) => {
   // Handle player exit
   socket.on("exitBattle", (username) => {
     const player = gameState.players.get(socket.id);
-    if (player) {
-      emitAdminLog("PLAYER", `${username} (${socket.id}) left the game`);
-      player.username = "";
+    if (player && player.username === username) {
       player.isReady = false;
+      emitAdminLog("PLAYER", `${username} (${socket.id}) left the battle`);
       broadcastPlayers();
+
+      // Check if we need to end the round
+      const readyPlayersCount = getReadyPlayersCount();
+      if (readyPlayersCount < 2 && gameState.isRoundActive) {
+        endRound("Not enough players remaining");
+      }
     }
   });
 
@@ -462,10 +496,8 @@ io.on("connection", (socket) => {
     broadcastPlayers();
 
     // End round if not enough players
-    const readyPlayers = Array.from(gameState.players.values()).filter(
-      (p) => p.username
-    );
-    if (readyPlayers.length < 2 && gameState.isRoundActive) {
+    const readyPlayersCount = getReadyPlayersCount();
+    if (readyPlayersCount < 2 && gameState.isRoundActive) {
       endRound("Not enough players remaining");
     }
   });
