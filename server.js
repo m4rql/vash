@@ -208,6 +208,17 @@ async function startAutomaticRound() {
     countdown--;
     io.emit("roundCountdown", countdown);
 
+    // Check if we still have enough ready players
+    const currentReadyCount = getReadyPlayersCount();
+    if (currentReadyCount < 2) {
+      clearInterval(countdownInterval);
+      gameState.isRoundActive = false;
+      io.emit("chatUpdate", {
+        message: "❌ Not enough players ready. Round cancelled.",
+      });
+      return;
+    }
+
     if (countdown <= 0) {
       clearInterval(countdownInterval);
       io.emit("roundCommencing");
@@ -277,7 +288,9 @@ function endRound() {
   gameState.currentState = "GAME_OVER";
   emitAdminLog(
     "GAME",
-    `Round ${gameState.roundNumber} over - Winner: ${gameState.winner.username}`
+    `Round ${gameState.roundNumber} over - Winner: ${
+      gameState.winner?.username || "No winner"
+    }`
   );
 
   // Reset all players' ready status
@@ -287,17 +300,31 @@ function endRound() {
     }
   });
 
+  // Clear any existing timers
+  if (gameState.roundTimer) {
+    clearInterval(gameState.roundTimer);
+    gameState.roundTimer = null;
+  }
+  gameTimers.forEach((timer) => clearTimeout(timer));
+  gameTimers.length = 0;
+
+  // Reset round state
+  gameState.isRoundActive = false;
+
   // Broadcast the round end
   io.emit("roundEnded", {
     message: "Round ended! Click Join Battle to join the next round!",
+    winner: gameState.winner,
   });
 
   broadcastPlayers();
 
-  // Start next round countdown after a short delay
-  setTimeout(() => {
-    startAutomaticRound();
-  }, 5000);
+  // Reset winner after broadcasting
+  gameState.winner = null;
+
+  // Change state to waiting for players
+  gameState.currentState = "WAITING_FOR_PLAYERS";
+  broadcastPlayers();
 }
 
 // Function to reset round state
@@ -464,7 +491,11 @@ io.on("connection", (socket) => {
 
       // Start round if enough players and not already started
       const readyPlayersCount = getReadyPlayersCount();
-      if (readyPlayersCount >= 2 && !gameState.isRoundActive) {
+      if (
+        readyPlayersCount >= 2 &&
+        !gameState.isRoundActive &&
+        gameState.currentState === "WAITING_FOR_PLAYERS"
+      ) {
         startAutomaticRound();
       }
     }
@@ -508,44 +539,6 @@ io.on("connection", (socket) => {
     }
   });
 });
-
-// Function to end the round
-function endRound(reason = "") {
-  if (!gameState.isRoundActive) return;
-
-  // Clear any existing timers
-  if (gameState.roundTimer) {
-    clearInterval(gameState.roundTimer);
-    gameState.roundTimer = null;
-  }
-
-  gameTimers.forEach((timer) => clearTimeout(timer));
-  gameTimers.length = 0;
-
-  // Reset game state
-  gameState.isRoundActive = false;
-  gameState.currentState = "WAITING_FOR_PLAYERS";
-
-  // Broadcast round end
-  io.emit("roundEnded", {
-    message: reason ? `Round ended: ${reason}` : "Round ended",
-    winner: gameState.winner,
-  });
-
-  // Reset winner
-  gameState.winner = null;
-  broadcastPlayers();
-
-  // Start new round after delay
-  setTimeout(() => {
-    if (
-      Array.from(gameState.players.values()).filter((p) => p.username).length >=
-      2
-    ) {
-      startAutomaticRound();
-    }
-  }, 5000);
-}
 
 // Function to emit admin logs
 function emitAdminLog(type, message) {
