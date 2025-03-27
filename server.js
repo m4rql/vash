@@ -435,23 +435,21 @@ io.on("connection", (socket) => {
   console.log("New client connected:", socket.id);
   emitAdminLog("CONNECTION", `New client connected: ${socket.id}`);
 
-  // Add new player to game state
-  gameState.players.set(socket.id, {
-    id: socket.id,
-    username: "",
-    isReady: false,
-  });
+  // Check if connection is from admin panel
+  const isAdmin = socket.handshake.headers.referer?.includes("/admin");
 
-  // Update player stats
-  updatePlayerStats(socket.id);
-  broadcastPlayers();
-
-  // Handle username setting
+  // Handle username setting - this is when we'll actually add the player
   socket.on("setUsername", (username) => {
-    const player = gameState.players.get(socket.id);
-    if (player) {
-      player.username = username;
+    if (!isAdmin && username) {
+      // Add player to game state when username is set
+      gameState.players.set(socket.id, {
+        id: socket.id,
+        username: username,
+        isReady: false,
+      });
+
       emitAdminLog("PLAYER", `${username} (${socket.id}) set their username`);
+      updatePlayerStats(socket.id);
       broadcastPlayers();
     }
   });
@@ -491,14 +489,22 @@ io.on("connection", (socket) => {
   // Handle disconnection
   socket.on("disconnect", () => {
     console.log("Client disconnected:", socket.id);
-    emitAdminLog("CONNECTION", `Client disconnected: ${socket.id}`);
-    gameState.players.delete(socket.id);
-    broadcastPlayers();
 
-    // End round if not enough players
-    const readyPlayersCount = getReadyPlayersCount();
-    if (readyPlayersCount < 2 && gameState.isRoundActive) {
-      endRound("Not enough players remaining");
+    // Only handle disconnection if it was a player with a username
+    const player = gameState.players.get(socket.id);
+    if (player && player.username) {
+      emitAdminLog(
+        "CONNECTION",
+        `${player.username} (${socket.id}) disconnected`
+      );
+      gameState.players.delete(socket.id);
+      broadcastPlayers();
+
+      // End round if not enough players
+      const readyPlayersCount = getReadyPlayersCount();
+      if (readyPlayersCount < 2 && gameState.isRoundActive) {
+        endRound("Not enough players remaining");
+      }
     }
   });
 });
